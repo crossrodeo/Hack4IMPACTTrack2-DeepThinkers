@@ -21,3 +21,15 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+# Dataset
+backend/data/
+
+# Trained models
+backend/models/*.h5
+backend/models/*.keras
+backend/models/training_plot.png
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
