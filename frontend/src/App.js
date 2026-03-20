@@ -101,6 +101,18 @@ function App() {
                 style={{ width: `${result.confidence}%` }}
               />
             </div>
+
+            {result.heatmap && (
+              <div className="heatmap-section">
+                <h3>🔥 Grad-CAM Explainability Heatmap</h3>
+                <p className="heatmap-desc">Areas highlighted in red/yellow show regions the AI focused on to make its decision.</p>
+                <img
+                  src={`data:image/png;base64,${result.heatmap}`}
+                  alt="Grad-CAM Heatmap"
+                  className="heatmap-img"
+                />
+              </div>
+            )}
           </div>
         )}
       </main>

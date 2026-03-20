@@ -4,6 +4,10 @@ import os
 import numpy as np
 from PIL import Image
 import cv2
+import sys
+
+sys.path.append(os.path.dirname(__file__))
+from utils.gradcam import generate_gradcam
 
 app = Flask(__name__)
 CORS(app)
@@ -53,13 +57,20 @@ def detect_image():
     img = extract_face(img_np)
     img = img.resize((224, 224))
     img_array = np.array(img) / 255.0
-    img_array = np.expand_dims(img_array, axis=0)
+    img_array = np.expand_dims(img_array, axis=0).astype(np.float32)
+
+    heatmap_base64 = None
 
     if model is not None:
         prediction = float(model.predict(img_array)[0][0])
-        # fake=0, real=1 — LOW prediction = FAKE, HIGH prediction = REAL
         label = "REAL" if prediction > 0.5 else "FAKE"
         confidence = round(prediction * 100 if label == "REAL" else (1 - prediction) * 100, 2)
+
+        # Generate Grad-CAM
+        try:
+            heatmap_base64 = generate_gradcam(model, img_array)
+        except Exception as e:
+            print(f"Grad-CAM error: {e}")
     else:
         score = float(np.random.uniform(0, 1))
         label = "REAL" if score > 0.5 else "FAKE"
@@ -68,7 +79,8 @@ def detect_image():
     return jsonify({
         "label": label,
         "confidence": confidence,
-        "modality": "image"
+        "modality": "image",
+        "heatmap": heatmap_base64
     })
 
 @app.route('/detect/audio', methods=['POST'])
