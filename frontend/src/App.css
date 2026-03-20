@@ -64,7 +64,6 @@ body {
 }
 
 .upload-box { text-align: center; }
-
 .upload-box input { display: none; }
 
 .upload-label {
@@ -144,13 +143,6 @@ body {
   transition: width 0.5s ease;
 }
 
-.footer {
-  text-align: center;
-  padding: 1rem;
-  color: #556677;
-  font-size: 0.8rem;
-  border-top: 1px solid #1e3a5f;
-}
 .heatmap-section {
   margin-top: 1.5rem;
   text-align: center;
@@ -173,4 +165,65 @@ body {
   max-width: 300px;
   border-radius: 10px;
   border: 2px solid #00d4ff44;
+}
+
+.bias-card {
+  width: 100%;
+  max-width: 600px;
+  background: #0d1b2a;
+  border: 1px solid #00d4ff33;
+  border-radius: 16px;
+  padding: 2rem;
+}
+
+.bias-card h2 {
+  color: #00d4ff;
+  font-size: 1.2rem;
+  margin-bottom: 0.5rem;
+}
+
+.bias-subtitle {
+  color: #8899aa;
+  font-size: 0.85rem;
+  margin-bottom: 1.5rem;
+}
+
+.bias-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.bias-item {
+  background: #111827;
+  border: 1px solid #1e3a5f;
+  border-radius: 10px;
+  padding: 0.75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.bias-item.full-width {
+  grid-column: span 2;
+}
+
+.bias-label {
+  font-size: 0.75rem;
+  color: #556677;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.bias-value {
+  font-size: 0.9rem;
+  color: #00d4ff;
+}
+
+.footer {
+  text-align: center;
+  padding: 1rem;
+  color: #556677;
+  font-size: 0.8rem;
+  border-top: 1px solid #1e3a5f;
 }

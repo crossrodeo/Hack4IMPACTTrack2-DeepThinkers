@@ -5,6 +5,12 @@ import numpy as np
 from PIL import Image
 import cv2
 import sys
+import librosa
+import base64
+import io
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
 sys.path.append(os.path.dirname(__file__))
 from utils.gradcam import generate_gradcam
@@ -37,6 +43,60 @@ def extract_face(img_array_uint8):
         return Image.fromarray(face)
     return Image.fromarray(img_array_uint8)
 
+# Audio analyzer
+def analyze_audio(file_stream, filename):
+    ext = os.path.splitext(filename)[1].lower()
+    temp_path = os.path.join(UPLOAD_FOLDER, f'temp_audio{ext}')
+    file_stream.save(temp_path)
+
+    try:
+        y, sr = librosa.load(temp_path, duration=10)
+
+        mel_spec = librosa.feature.melspectrogram(y=y, sr=sr, n_mels=128)
+        mel_db = librosa.power_to_db(mel_spec, ref=np.max)
+
+        mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
+        mfcc_var = np.var(mfcc)
+
+        score = min(max((mfcc_var / 5000), 0), 1)
+        label = "FAKE" if score > 0.5 else "REAL"
+        confidence = round(score * 100 if label == "FAKE" else (1 - score) * 100, 2)
+
+        fig, axes = plt.subplots(2, 1, figsize=(8, 6))
+        fig.patch.set_facecolor('#0a0e1a')
+
+        axes[0].set_facecolor('#111827')
+        librosa.display.waveshow(y, sr=sr, ax=axes[0], color='#00d4ff')
+        axes[0].set_title('Waveform', color='#00d4ff', fontsize=10)
+        axes[0].tick_params(colors='#8899aa')
+        axes[0].spines['bottom'].set_color('#1e3a5f')
+        axes[0].spines['top'].set_color('#1e3a5f')
+        axes[0].spines['left'].set_color('#1e3a5f')
+        axes[0].spines['right'].set_color('#1e3a5f')
+
+        axes[1].set_facecolor('#111827')
+        librosa.display.specshow(mel_db, sr=sr, x_axis='time', y_axis='mel', ax=axes[1], cmap='inferno')
+        axes[1].set_title('Mel Spectrogram', color='#00d4ff', fontsize=10)
+        axes[1].tick_params(colors='#8899aa')
+        axes[1].spines['bottom'].set_color('#1e3a5f')
+        axes[1].spines['top'].set_color('#1e3a5f')
+        axes[1].spines['left'].set_color('#1e3a5f')
+        axes[1].spines['right'].set_color('#1e3a5f')
+
+        plt.tight_layout()
+
+        buffer = io.BytesIO()
+        plt.savefig(buffer, format='PNG', facecolor='#0a0e1a')
+        buffer.seek(0)
+        spectrogram_base64 = base64.b64encode(buffer.read()).decode('utf-8')
+        plt.close()
+
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+    return label, confidence, spectrogram_base64
+
 @app.route('/', methods=['GET'])
 def home():
     return jsonify({
@@ -53,7 +113,6 @@ def detect_image():
     img = Image.open(file.stream).convert('RGB')
     img_np = np.array(img)
 
-    # Extract face before prediction
     img = extract_face(img_np)
     img = img.resize((224, 224))
     img_array = np.array(img) / 255.0
@@ -65,8 +124,6 @@ def detect_image():
         prediction = float(model.predict(img_array)[0][0])
         label = "REAL" if prediction > 0.5 else "FAKE"
         confidence = round(prediction * 100 if label == "REAL" else (1 - prediction) * 100, 2)
-
-        # Generate Grad-CAM
         try:
             heatmap_base64 = generate_gradcam(model, img_array)
         except Exception as e:
@@ -87,10 +144,21 @@ def detect_image():
 def detect_audio():
     if 'file' not in request.files:
         return jsonify({"error": "No file uploaded"}), 400
-    score = float(np.random.uniform(0, 1))
-    label = "REAL" if score > 0.5 else "FAKE"
-    confidence = round(score * 100 if label == "REAL" else (1 - score) * 100, 2)
-    return jsonify({"label": label, "confidence": confidence, "modality": "audio"})
+
+    file = request.files['file']
+    filename = file.filename
+
+    try:
+        label, confidence, spectrogram = analyze_audio(file, filename)
+        return jsonify({
+            "label": label,
+            "confidence": confidence,
+            "modality": "audio",
+            "spectrogram": spectrogram
+        })
+    except Exception as e:
+        print(f"Audio error: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/detect/video', methods=['POST'])
 def detect_video():
