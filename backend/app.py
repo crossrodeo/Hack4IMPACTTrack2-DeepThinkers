@@ -55,12 +55,49 @@ def analyze_audio(file_stream, filename):
         mel_spec = librosa.feature.melspectrogram(y=y, sr=sr, n_mels=128)
         mel_db = librosa.power_to_db(mel_spec, ref=np.max)
 
-        mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
-        mfcc_var = np.var(mfcc)
+        # Check for silence/muted audio
+        rms = np.sqrt(np.mean(y**2))
+        if rms < 0.01:
+            label = "FAKE"
+            confidence = 97.5
+        else:
+            # Multi-feature analysis
+            mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
+            mfcc_var = np.var(mfcc)
+            mfcc_delta = librosa.feature.delta(mfcc)
+            mfcc_delta_var = np.var(mfcc_delta)
 
-        score = min(max((mfcc_var / 5000), 0), 1)
-        label = "FAKE" if score > 0.5 else "REAL"
-        confidence = round(score * 100 if label == "FAKE" else (1 - score) * 100, 2)
+            # Spectral features
+            spectral_rolloff = np.mean(librosa.feature.spectral_rolloff(y=y, sr=sr))
+            spectral_bandwidth = np.mean(librosa.feature.spectral_bandwidth(y=y, sr=sr))
+            spectral_contrast = np.mean(librosa.feature.spectral_contrast(y=y, sr=sr))
+
+            # Pitch regularity (AI voices are too regular)
+            pitches, magnitudes = librosa.piptrack(y=y, sr=sr)
+            pitch_values = pitches[magnitudes > np.median(magnitudes)]
+            pitch_std = np.std(pitch_values) if len(pitch_values) > 0 else 0
+
+            # Zero crossing rate variation (AI voices are too smooth)
+            zcr = librosa.feature.zero_crossing_rate(y)
+            zcr_std = np.std(zcr)
+
+            # Breathing/pause detection (AI voices lack natural pauses)
+            rms_frames = librosa.feature.rms(y=y)[0]
+            silence_ratio = np.sum(rms_frames < 0.01) / len(rms_frames)
+
+            # Score computation
+            # Real voices have: high pitch variation, high zcr variation,
+            # natural pauses, high mfcc delta variance
+            naturalness_score = (
+                min(pitch_std / 500, 1) * 0.3 +
+                min(zcr_std * 100, 1) * 0.2 +
+                min(mfcc_delta_var / 100, 1) * 0.25 +
+                min(silence_ratio * 3, 1) * 0.15 +
+                min(spectral_contrast / 30, 1) * 0.1
+            )
+
+            label = "REAL" if naturalness_score > 0.35 else "FAKE"
+            confidence = round(naturalness_score * 100 if label == "REAL" else (1 - naturalness_score) * 100, 2)
 
         fig, axes = plt.subplots(2, 1, figsize=(8, 6))
         fig.patch.set_facecolor('#0a0e1a')
