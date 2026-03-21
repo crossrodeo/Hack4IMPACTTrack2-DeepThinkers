@@ -53,9 +53,7 @@ def analyze_video(file_stream, filename):
         cap = cv2.VideoCapture(temp_path)
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         fps = cap.get(cv2.CAP_PROP_FPS)
-        duration = total_frames / fps if fps > 0 else 0
 
-        # Sample 10 frames evenly across the video
         sample_count = min(10, total_frames)
         frame_indices = np.linspace(0, total_frames - 1, sample_count, dtype=int)
 
@@ -69,13 +67,10 @@ def analyze_video(file_stream, filename):
             if not ret:
                 continue
 
-            # Convert BGR to RGB
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-            # Extract face
-            face_img = extract_face(frame_rgb)
-            face_img = face_img.resize((224, 224))
-            img_array = np.array(face_img) / 255.0
+            # Skip face extraction for video — use full frame directly
+            img = Image.fromarray(frame_rgb).resize((224, 224))
+            img_array = np.array(img) / 255.0
             img_array = np.expand_dims(img_array, axis=0).astype(np.float32)
 
             if model is not None:
@@ -83,7 +78,6 @@ def analyze_video(file_stream, filename):
                 frame_predictions.append(prediction)
                 frame_timestamps.append(round(idx / fps, 2) if fps > 0 else idx)
 
-                # Generate heatmap for middle frame only
                 if idx == frame_indices[len(frame_indices) // 2] and sample_heatmap is None:
                     try:
                         sample_heatmap = generate_gradcam(model, img_array)
@@ -98,15 +92,15 @@ def analyze_video(file_stream, filename):
         avg_prediction = np.mean(frame_predictions)
         fake_frame_ratio = np.sum(np.array(frame_predictions) < 0.5) / len(frame_predictions)
 
-        # If more than 40% of frames are fake, flag as fake
-        if fake_frame_ratio > 0.4:
+        print(f"DEBUG: fake_frame_ratio={fake_frame_ratio}, avg={avg_prediction}")
+
+        if fake_frame_ratio >= 0.3:
             label = "FAKE"
             confidence = round(fake_frame_ratio * 100, 2)
         else:
             label = "REAL"
             confidence = round(avg_prediction * 100, 2)
 
-        # Generate timeline chart
         fig, ax = plt.subplots(figsize=(8, 3))
         fig.patch.set_facecolor('#0a0e1a')
         ax.set_facecolor('#111827')
@@ -151,9 +145,7 @@ def analyze_audio(file_stream, filename):
         mel_db = librosa.power_to_db(mel_spec, ref=np.max)
 
         mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
-        mfcc_var = np.var(mfcc)
 
-        # Check for silence/muted audio
         rms = np.sqrt(np.mean(y**2))
         if rms < 0.01:
             label = "FAKE"
