@@ -43,6 +43,101 @@ def extract_face(img_array_uint8):
         return Image.fromarray(face)
     return Image.fromarray(img_array_uint8)
 
+# Video analyzer
+def analyze_video(file_stream, filename):
+    ext = os.path.splitext(filename)[1].lower()
+    temp_path = os.path.join(UPLOAD_FOLDER, f'temp_video{ext}')
+    file_stream.save(temp_path)
+
+    try:
+        cap = cv2.VideoCapture(temp_path)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        duration = total_frames / fps if fps > 0 else 0
+
+        # Sample 10 frames evenly across the video
+        sample_count = min(10, total_frames)
+        frame_indices = np.linspace(0, total_frames - 1, sample_count, dtype=int)
+
+        frame_predictions = []
+        frame_timestamps = []
+        sample_heatmap = None
+
+        for idx in frame_indices:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+            ret, frame = cap.read()
+            if not ret:
+                continue
+
+            # Convert BGR to RGB
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+            # Extract face
+            face_img = extract_face(frame_rgb)
+            face_img = face_img.resize((224, 224))
+            img_array = np.array(face_img) / 255.0
+            img_array = np.expand_dims(img_array, axis=0).astype(np.float32)
+
+            if model is not None:
+                prediction = float(model.predict(img_array, verbose=0)[0][0])
+                frame_predictions.append(prediction)
+                frame_timestamps.append(round(idx / fps, 2) if fps > 0 else idx)
+
+                # Generate heatmap for middle frame only
+                if idx == frame_indices[len(frame_indices) // 2] and sample_heatmap is None:
+                    try:
+                        sample_heatmap = generate_gradcam(model, img_array)
+                    except:
+                        pass
+
+        cap.release()
+
+        if not frame_predictions:
+            return "REAL", 50.0, None, None
+
+        avg_prediction = np.mean(frame_predictions)
+        fake_frame_ratio = np.sum(np.array(frame_predictions) < 0.5) / len(frame_predictions)
+
+        # If more than 40% of frames are fake, flag as fake
+        if fake_frame_ratio > 0.4:
+            label = "FAKE"
+            confidence = round(fake_frame_ratio * 100, 2)
+        else:
+            label = "REAL"
+            confidence = round(avg_prediction * 100, 2)
+
+        # Generate timeline chart
+        fig, ax = plt.subplots(figsize=(8, 3))
+        fig.patch.set_facecolor('#0a0e1a')
+        ax.set_facecolor('#111827')
+
+        colors = ['#ff4444' if p < 0.5 else '#00ff88' for p in frame_predictions]
+        ax.bar(frame_timestamps, frame_predictions, color=colors, width=0.3)
+        ax.axhline(y=0.5, color='#00d4ff', linestyle='--', alpha=0.7, label='Decision boundary')
+        ax.set_xlabel('Time (seconds)', color='#8899aa')
+        ax.set_ylabel('Real Probability', color='#8899aa')
+        ax.set_title('Frame-by-Frame Analysis', color='#00d4ff', fontsize=10)
+        ax.tick_params(colors='#8899aa')
+        ax.spines['bottom'].set_color('#1e3a5f')
+        ax.spines['top'].set_color('#1e3a5f')
+        ax.spines['left'].set_color('#1e3a5f')
+        ax.spines['right'].set_color('#1e3a5f')
+        ax.legend(facecolor='#111827', labelcolor='#8899aa')
+        ax.set_ylim(0, 1)
+
+        plt.tight_layout()
+        buffer = io.BytesIO()
+        plt.savefig(buffer, format='PNG', facecolor='#0a0e1a')
+        buffer.seek(0)
+        timeline_base64 = base64.b64encode(buffer.read()).decode('utf-8')
+        plt.close()
+
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+    return label, confidence, timeline_base64, sample_heatmap
+
 # Audio analyzer
 def analyze_audio(file_stream, filename):
     ext = os.path.splitext(filename)[1].lower()
@@ -55,39 +150,26 @@ def analyze_audio(file_stream, filename):
         mel_spec = librosa.feature.melspectrogram(y=y, sr=sr, n_mels=128)
         mel_db = librosa.power_to_db(mel_spec, ref=np.max)
 
+        mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
+        mfcc_var = np.var(mfcc)
+
         # Check for silence/muted audio
         rms = np.sqrt(np.mean(y**2))
         if rms < 0.01:
             label = "FAKE"
             confidence = 97.5
         else:
-            # Multi-feature analysis
-            mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
-            mfcc_var = np.var(mfcc)
             mfcc_delta = librosa.feature.delta(mfcc)
             mfcc_delta_var = np.var(mfcc_delta)
-
-            # Spectral features
-            spectral_rolloff = np.mean(librosa.feature.spectral_rolloff(y=y, sr=sr))
-            spectral_bandwidth = np.mean(librosa.feature.spectral_bandwidth(y=y, sr=sr))
             spectral_contrast = np.mean(librosa.feature.spectral_contrast(y=y, sr=sr))
-
-            # Pitch regularity (AI voices are too regular)
             pitches, magnitudes = librosa.piptrack(y=y, sr=sr)
             pitch_values = pitches[magnitudes > np.median(magnitudes)]
             pitch_std = np.std(pitch_values) if len(pitch_values) > 0 else 0
-
-            # Zero crossing rate variation (AI voices are too smooth)
             zcr = librosa.feature.zero_crossing_rate(y)
             zcr_std = np.std(zcr)
-
-            # Breathing/pause detection (AI voices lack natural pauses)
             rms_frames = librosa.feature.rms(y=y)[0]
             silence_ratio = np.sum(rms_frames < 0.01) / len(rms_frames)
 
-            # Score computation
-            # Real voices have: high pitch variation, high zcr variation,
-            # natural pauses, high mfcc delta variance
             naturalness_score = (
                 min(pitch_std / 500, 1) * 0.3 +
                 min(zcr_std * 100, 1) * 0.2 +
@@ -121,7 +203,6 @@ def analyze_audio(file_stream, filename):
         axes[1].spines['right'].set_color('#1e3a5f')
 
         plt.tight_layout()
-
         buffer = io.BytesIO()
         plt.savefig(buffer, format='PNG', facecolor='#0a0e1a')
         buffer.seek(0)
@@ -201,10 +282,22 @@ def detect_audio():
 def detect_video():
     if 'file' not in request.files:
         return jsonify({"error": "No file uploaded"}), 400
-    score = float(np.random.uniform(0, 1))
-    label = "REAL" if score > 0.5 else "FAKE"
-    confidence = round(score * 100 if label == "REAL" else (1 - score) * 100, 2)
-    return jsonify({"label": label, "confidence": confidence, "modality": "video"})
+
+    file = request.files['file']
+    filename = file.filename
+
+    try:
+        label, confidence, timeline, heatmap = analyze_video(file, filename)
+        return jsonify({
+            "label": label,
+            "confidence": confidence,
+            "modality": "video",
+            "timeline": timeline,
+            "heatmap": heatmap
+        })
+    except Exception as e:
+        print(f"Video error: {e}")
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

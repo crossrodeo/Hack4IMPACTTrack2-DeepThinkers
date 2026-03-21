@@ -15,6 +15,8 @@ function App() {
     setResult(null);
     if (selected && modality === 'image') {
       setPreview(URL.createObjectURL(selected));
+    } else if (selected && modality === 'video') {
+      setPreview(URL.createObjectURL(selected));
     } else {
       setPreview(null);
     }
@@ -95,15 +97,25 @@ function App() {
             </label>
           </div>
 
-          {preview && (
+          {preview && modality === 'image' && (
             <div className="preview">
               <img src={preview} alt="Preview" />
+            </div>
+          )}
+
+          {preview && modality === 'video' && (
+            <div className="preview">
+              <video src={preview} controls style={{ width: '100%', borderRadius: '8px' }} />
             </div>
           )}
 
           <button className="detect-btn" onClick={handleDetect} disabled={loading}>
             {loading ? '🔍 Analyzing...' : '🔍 Detect'}
           </button>
+
+          {loading && modality === 'video' && (
+            <p className="loading-note">⏳ Analyzing video frames — this may take 30-60 seconds...</p>
+          )}
         </div>
 
         {result && (
@@ -138,6 +150,19 @@ function App() {
                   <img
                     src={`data:image/png;base64,${result.spectrogram}`}
                     alt="Audio Spectrogram"
+                    className="heatmap-img"
+                    style={{ maxWidth: '100%' }}
+                  />
+                </div>
+              )}
+
+              {result.timeline && (
+                <div className="heatmap-section">
+                  <h3>🎬 Frame-by-Frame Analysis</h3>
+                  <p className="heatmap-desc">Green bars = REAL frames, Red bars = FAKE frames. Blue line = decision boundary.</p>
+                  <img
+                    src={`data:image/png;base64,${result.timeline}`}
+                    alt="Video Timeline"
                     className="heatmap-img"
                     style={{ maxWidth: '100%' }}
                   />
